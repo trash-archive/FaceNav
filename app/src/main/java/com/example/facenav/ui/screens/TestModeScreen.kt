@@ -5,35 +5,30 @@ import android.content.Intent
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.navigation.NavController
-import com.example.facenav.data.PreferencesManager
 import com.example.facenav.model.FacialGesture
 import com.example.facenav.service.FaceDetectionService
 import com.example.facenav.service.FaceNavAccessibilityService
 import com.example.facenav.service.GestureEventBus
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+import com.example.facenav.service.ServiceStateHolder
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -42,59 +37,40 @@ import java.util.*
 fun TestModeScreen(navController: NavController) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val scope = rememberCoroutineScope()
-    val preferencesManager = remember { PreferencesManager(context) }
 
-    var isDetecting by remember { mutableStateOf(false) }
+    val isDetecting by ServiceStateHolder.isRunning.collectAsState()
     var detectedGestures by remember { mutableStateOf<List<GestureLog>>(emptyList()) }
-    var isAccessibilityEnabled by remember {
-        mutableStateOf(FaceNavAccessibilityService.isServiceEnabled())
-    }
+    var isAccessibilityEnabled by remember { mutableStateOf(FaceNavAccessibilityService.isServiceEnabled()) }
     var showAccessibilityWarning by remember { mutableStateOf(false) }
 
-    // Auto-refresh accessibility service status
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
+            if (event == Lifecycle.Event.ON_RESUME)
                 isAccessibilityEnabled = FaceNavAccessibilityService.isServiceEnabled()
-            }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // Monitor gesture detection from accessibility service
-    LaunchedEffect(isDetecting) {
-        if (isDetecting) {
-            // Listen to gesture events from the service
-            GestureEventBus.gestureEvents.collect { event ->
-                detectedGestures = detectedGestures + GestureLog(
+    LaunchedEffect(Unit) {
+        GestureEventBus.gestureEvents.collect { event ->
+            if (isDetecting) {
+                val newLog = GestureLog(
                     gesture = event.gesture,
                     timestamp = event.timestamp,
                     confidence = event.confidence
                 )
+                detectedGestures = (detectedGestures + newLog).takeLast(100)
             }
         }
     }
-
-    // Simulate pulse animation for camera indicator
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1000, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "pulse"
-    )
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
                     Column {
-                        Text("Test Mode")
+                        Text("Test Mode", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                         Text(
                             "Real-time gesture detection",
                             style = MaterialTheme.typography.bodySmall,
@@ -104,24 +80,10 @@ fun TestModeScreen(navController: NavController) {
                 },
                 navigationIcon = {
                     IconButton(onClick = { navController.navigateUp() }) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.Outlined.ArrowBack, contentDescription = "Back")
                     }
                 },
-                actions = {
-                    IconButton(
-                        onClick = {
-                            // Show stats or info dialog
-                            scope.launch {
-                                // Could show statistics about detected gestures
-                            }
-                        }
-                    ) {
-                        Icon(Icons.Default.Info, contentDescription = "Info")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                )
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
             )
         }
     ) { paddingValues ->
@@ -130,361 +92,236 @@ fun TestModeScreen(navController: NavController) {
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            // Accessibility Warning
+            // ── Accessibility warning ─────────────────────────────────────────
             AnimatedVisibility(
                 visible = !isAccessibilityEnabled && showAccessibilityWarning,
                 enter = expandVertically() + fadeIn(),
                 exit = shrinkVertically() + fadeOut()
             ) {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer
-                    )
+                Surface(
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
-                        modifier = Modifier.padding(16.dp),
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
-                            Icons.Default.Warning,
+                            Icons.Outlined.Info,
                             contentDescription = null,
+                            modifier = Modifier.size(18.dp),
                             tint = MaterialTheme.colorScheme.error
                         )
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                "Accessibility Required",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onErrorContainer
-                            )
-                            Text(
-                                "Enable accessibility service to test gestures",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onErrorContainer
-                            )
-                        }
+                        Text(
+                            "Enable accessibility service to test gestures",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.weight(1f)
+                        )
                         TextButton(
                             onClick = {
-                                val intent = Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                                context.startActivity(intent)
-                            }
+                                context.startActivity(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                            },
+                            contentPadding = PaddingValues(0.dp),
+                            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
                         ) {
-                            Text("Enable")
+                            Text("Enable", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
             }
 
-            // Camera Preview Section
-            Card(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp)
-                    .height(280.dp),
-                shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                )
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            brush = Brush.verticalGradient(
-                                colors = listOf(
-                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)
-                                )
-                            )
-                        ),
-                    contentAlignment = Alignment.Center
+                // ── Camera status card ────────────────────────────────────────
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = if (isDetecting) MaterialTheme.colorScheme.primaryContainer
+                    else MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        // Camera Icon with Pulse
-                        Box(
-                            modifier = Modifier
-                                .size(80.dp)
-                                .scale(if (isDetecting) pulseScale else 1f)
-                                .background(
-                                    color = if (isDetecting)
-                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-                                    else
-                                        MaterialTheme.colorScheme.surfaceVariant,
-                                    shape = CircleShape
-                                )
-                                .border(
-                                    width = 3.dp,
-                                    color = if (isDetecting)
-                                        MaterialTheme.colorScheme.primary
-                                    else
-                                        MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
-                                    shape = CircleShape
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Videocam,
-                                contentDescription = null,
-                                modifier = Modifier.size(40.dp),
-                                tint = if (isDetecting)
-                                    MaterialTheme.colorScheme.primary
-                                else
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-
-                        Text(
-                            text = if (isDetecting) "Camera Active" else "Camera Standby",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-
-                        Text(
-                            text = if (isDetecting)
-                                "Detecting facial gestures in real-time"
-                            else
-                                "Start detection to test your gestures",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                        )
-
-                        // Live gesture count
-                        if (isDetecting) {
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Card(
-                                    colors = CardDefaults.cardColors(
-                                        containerColor = MaterialTheme.colorScheme.primaryContainer
-                                    )
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(
-                                            Icons.Default.TouchApp,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(16.dp),
-                                            tint = MaterialTheme.colorScheme.onPrimaryContainer
-                                        )
-                                        Text(
-                                            text = "${detectedGestures.size} detected",
-                                            style = MaterialTheme.typography.labelMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Status Indicator
                     Row(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(16.dp)
-                            .background(
-                                color = if (isDetecting)
-                                    MaterialTheme.colorScheme.primaryContainer
-                                else
-                                    MaterialTheme.colorScheme.surfaceVariant,
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .background(
-                                    color = if (isDetecting)
-                                        MaterialTheme.colorScheme.primary
-                                    else
-                                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                    shape = CircleShape
-                                )
-                        )
-                        Text(
-                            text = if (isDetecting) "LIVE" else "OFF",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isDetecting)
-                                MaterialTheme.colorScheme.onPrimaryContainer
-                            else
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
-
-            // Control Button
-            Button(
-                onClick = {
-                    if (!isAccessibilityEnabled) {
-                        showAccessibilityWarning = true
-                        return@Button
-                    }
-
-                    if (isDetecting) {
-                        // Stop detection
-                        stopFaceDetection(context)
-                        isDetecting = false
-                    } else {
-                        // Start detection
-                        startFaceDetection(context)
-                        isDetecting = true
-                        showAccessibilityWarning = false
-                    }
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .height(56.dp),
-                shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isDetecting)
-                        MaterialTheme.colorScheme.error
-                    else
-                        MaterialTheme.colorScheme.primary
-                )
-            ) {
-                Icon(
-                    imageVector = if (isDetecting) Icons.Default.Stop else Icons.Default.PlayArrow,
-                    contentDescription = null,
-                    modifier = Modifier.size(24.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = if (isDetecting) "Stop Detection" else "Start Detection",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Detected Gestures Section
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .weight(1f),
-                shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                )
-            ) {
-                Column(modifier = Modifier.fillMaxSize()) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(20.dp),
+                        modifier = Modifier.padding(20.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                Icons.Default.History,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(24.dp)
-                            )
-                            Column {
-                                Text(
-                                    text = "Detection Log",
-                                    style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.Bold
+                            Surface(
+                                modifier = Modifier.size(52.dp),
+                                shape = RoundedCornerShape(14.dp),
+                                color = if (isDetecting) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                            ) {
+                                Icon(
+                                    Icons.Outlined.Videocam,
+                                    contentDescription = null,
+                                    modifier = Modifier.padding(13.dp),
+                                    tint = if (isDetecting) MaterialTheme.colorScheme.onPrimary
+                                    else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                                if (detectedGestures.isNotEmpty()) {
-                                    Text(
-                                        text = "${detectedGestures.size} gestures",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
+                            }
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(
+                                    if (isDetecting) "Camera Active" else "Camera Standby",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (isDetecting) MaterialTheme.colorScheme.onPrimaryContainer
+                                    else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    if (isDetecting) "Detecting facial gestures" else "Start detection to begin",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (isDetecting)
+                                        MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                )
                             }
                         }
 
-                        if (detectedGestures.isNotEmpty()) {
-                            TextButton(
-                                onClick = { detectedGestures = emptyList() }
+                        // Live / Off pill
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = if (isDetecting)
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                            else MaterialTheme.colorScheme.outline.copy(alpha = 0.1f)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    Icons.Default.Delete,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(18.dp)
+                                Box(
+                                    modifier = Modifier
+                                        .size(6.dp)
+                                        .background(
+                                            color = if (isDetecting) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.outline,
+                                            shape = RoundedCornerShape(50)
+                                        )
                                 )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Clear")
+                                Text(
+                                    if (isDetecting) "LIVE" else "OFF",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isDetecting) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
                     }
+                }
 
-                    HorizontalDivider()
+                // ── Control button ────────────────────────────────────────────
+                val btnColor by animateColorAsState(
+                    targetValue = if (isDetecting) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.primary,
+                    label = "btnColor"
+                )
+                Button(
+                    onClick = {
+                        if (!isAccessibilityEnabled) { showAccessibilityWarning = true; return@Button }
+                        if (isDetecting) stopFaceDetection(context)
+                        else { startFaceDetection(context); showAccessibilityWarning = false }
+                    },
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = btnColor),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isDetecting) Icons.Outlined.Stop else Icons.Outlined.PlayArrow,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        if (isDetecting) "Stop Detection" else "Start Detection",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
 
-                    if (detectedGestures.isEmpty()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(40.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                Icon(
-                                    Icons.Default.SensorsOff,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(64.dp),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-                                )
-                                Text(
-                                    text = "No gestures detected yet",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Text(
-                                    text = "Start detection and perform gestures to see them logged here",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                                )
-                            }
-                        }
-                    } else {
-                        LazyColumn(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f),
-                            contentPadding = PaddingValues(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            items(
-                                items = detectedGestures.reversed(),
-                                key = { "${it.gesture.name}_${it.timestamp}" }
-                            ) { log ->
-                                GestureLogItem(log)
-                            }
-                        }
+            // ── Detection log ─────────────────────────────────────────────────
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 14.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text("Detection Log", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    if (detectedGestures.isNotEmpty()) {
+                        Text(
+                            "${detectedGestures.size} gestures captured",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                if (detectedGestures.isNotEmpty()) {
+                    TextButton(
+                        onClick = { detectedGestures = emptyList() },
+                        contentPadding = PaddingValues(0.dp),
+                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
+                    ) {
+                        Icon(Icons.Outlined.DeleteOutline, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Clear", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
+
+            if (detectedGestures.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize().padding(40.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            Icons.Outlined.SensorsOff,
+                            contentDescription = null,
+                            modifier = Modifier.size(48.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+                        )
+                        Text(
+                            "No gestures yet",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            "Start detection and perform gestures to see them logged here",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(
+                        items = detectedGestures.reversed(),
+                        key = { "${it.gesture.name}_${it.timestamp}" }
+                    ) { log ->
+                        GestureLogItem(log)
                     }
                 }
             }
@@ -492,105 +329,84 @@ fun TestModeScreen(navController: NavController) {
     }
 }
 
-data class GestureLog(
-    val gesture: FacialGesture,
-    val timestamp: Long,
-    val confidence: Float
-)
+// ── Log item ──────────────────────────────────────────────────────────────────
+
+data class GestureLog(val gesture: FacialGesture, val timestamp: Long, val confidence: Float)
 
 @Composable
 fun GestureLogItem(log: GestureLog) {
     val timeFormat = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
-
     var visible by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        visible = true
-    }
+    LaunchedEffect(Unit) { visible = true }
 
     AnimatedVisibility(
         visible = visible,
-        enter = slideInHorizontally(
-            initialOffsetX = { -it },
-            animationSpec = spring(stiffness = Spring.StiffnessMedium)
-        ) + fadeIn()
+        enter = slideInHorizontally(initialOffsetX = { -it }, animationSpec = spring(stiffness = Spring.StiffnessMedium)) + fadeIn()
     ) {
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-            ),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            modifier = Modifier.fillMaxWidth()
         ) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.padding(14.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Gesture Emoji
-                Box(
-                    modifier = Modifier
-                        .size(48.dp)
-                        .background(
-                            MaterialTheme.colorScheme.primaryContainer,
-                            CircleShape
-                        ),
-                    contentAlignment = Alignment.Center
+                // Gesture icon
+                Surface(
+                    modifier = Modifier.size(38.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer
                 ) {
-                    Text(
-                        text = log.gesture.getEmoji(),
-                        style = MaterialTheme.typography.headlineSmall
+                    Icon(
+                        imageVector = log.gesture.toMaterialIcon(),
+                        contentDescription = null,
+                        modifier = Modifier.padding(9.dp),
+                        tint = MaterialTheme.colorScheme.primary
                     )
                 }
 
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = log.gesture.getDisplayName(),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
+                        log.gesture.getDisplayName(),
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold
                     )
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
-                            Icons.Default.Schedule,
+                            Icons.Outlined.Schedule,
                             contentDescription = null,
-                            modifier = Modifier.size(14.dp),
+                            modifier = Modifier.size(11.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Text(
-                            text = timeFormat.format(Date(log.timestamp)),
+                            timeFormat.format(Date(log.timestamp)),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
 
-                // Confidence indicator
-                Box(
-                    modifier = Modifier
-                        .background(
-                            color = when {
-                                log.confidence >= 0.8f -> MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-                                log.confidence >= 0.6f -> MaterialTheme.colorScheme.tertiary.copy(alpha = 0.2f)
-                                else -> MaterialTheme.colorScheme.error.copy(alpha = 0.2f)
-                            },
-                            shape = RoundedCornerShape(8.dp)
-                        )
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                // Confidence badge
+                val confColor = when {
+                    log.confidence >= 0.8f -> MaterialTheme.colorScheme.primary
+                    log.confidence >= 0.6f -> MaterialTheme.colorScheme.tertiary
+                    else -> MaterialTheme.colorScheme.error
+                }
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = confColor.copy(alpha = 0.12f)
                 ) {
                     Text(
-                        text = "${(log.confidence * 100).toInt()}%",
+                        "${(log.confidence * 100).toInt()}%",
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold,
-                        color = when {
-                            log.confidence >= 0.8f -> MaterialTheme.colorScheme.primary
-                            log.confidence >= 0.6f -> MaterialTheme.colorScheme.tertiary
-                            else -> MaterialTheme.colorScheme.error
-                        }
+                        color = confColor
                     )
                 }
             }
@@ -599,15 +415,13 @@ fun GestureLogItem(log: GestureLog) {
 }
 
 private fun startFaceDetection(context: Context) {
-    val intent = Intent(context, FaceDetectionService::class.java).apply {
-        action = FaceDetectionService.ACTION_START
-    }
-    context.startForegroundService(intent)
+    context.startForegroundService(
+        Intent(context, FaceDetectionService::class.java).apply { action = FaceDetectionService.ACTION_START }
+    )
 }
 
 private fun stopFaceDetection(context: Context) {
-    val intent = Intent(context, FaceDetectionService::class.java).apply {
-        action = FaceDetectionService.ACTION_STOP
-    }
-    context.stopService(intent)
+    context.stopService(
+        Intent(context, FaceDetectionService::class.java).apply { action = FaceDetectionService.ACTION_STOP }
+    )
 }

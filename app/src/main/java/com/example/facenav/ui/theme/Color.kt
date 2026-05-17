@@ -2,10 +2,12 @@ package com.example.facenav.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-val Purple80 = Color(0xFFD0BCFF)
-val PurpleGrey80 = Color(0xFFCCC2DC)
-val Pink80 = Color(0xFFEFB8C8)
+// Light scheme — warm indigo
+val Indigo40     = Color(0xFF5C6BC0)   // Indigo 400
+val IndigoGrey40 = Color(0xFF546E7A)
+val Mauve40      = Color(0xFF7E57C2)
 
-val Purple40 = Color(0xFF6650a4)
-val PurpleGrey40 = Color(0xFF625b71)
-val Pink40 = Color(0xFF7D5260)
+// Dark scheme
+val Indigo80     = Color(0xFF9FA8DA)   // Indigo 200
+val IndigoGrey80 = Color(0xFFB0BEC5)
+val Mauve80      = Color(0xFFCE93D8)

@@ -3,7 +3,6 @@ package com.example.facenav.service
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.Service
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
@@ -25,9 +24,9 @@ import com.example.facenav.model.AppSettings
 import com.example.facenav.model.FacialGesture
 import com.example.facenav.model.GestureMapping
 import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.first
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
  * Foreground service that handles face detection and gesture recognition
@@ -38,11 +37,14 @@ class FaceDetectionService : LifecycleService() {
     private lateinit var gestureDetector: GestureDetector
     private lateinit var preferencesManager: PreferencesManager
     private lateinit var killSwitch: EmergencyKillSwitch
+    private lateinit var voiceCommandHandler: VoiceCommandHandler
     private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     private var gestureMappings: Map<FacialGesture, GestureMapping> = emptyMap()
-    private var appSettings: AppSettings = AppSettings()
-    private var isProcessing = false
+    // @Volatile ensures the camera executor thread always reads the latest
+    // value written by the serviceScope coroutine (Issue 12).
+    @Volatile private var appSettings: AppSettings = AppSettings()
+    @Volatile private var isProcessing = false
 
     companion object {
         private const val TAG = "FaceDetectionService"
@@ -73,14 +75,17 @@ class FaceDetectionService : LifecycleService() {
         gestureDetector = GestureDetector(appSettings)
 
         // Initialize kill switch
-        killSwitch = EmergencyKillSwitch(this)
+        killSwitch = EmergencyKillSwitch.getOrCreate(this)
         killSwitch.showQuickAccessNotification()
 
-        // Monitor kill switch state
+        // Wire up voice command handler (Issue 1 – Critical)
+        voiceCommandHandler = VoiceCommandHandler(this, killSwitch)
+
+        // Monitor kill switch state – isActive=false means detection is STOPPED (Issue 5)
         lifecycleScope.launch {
-            killSwitch.isActive.collect { isActive ->
-                if (!isActive) {
-                    Log.d(TAG, "Kill switch activated - stopping gesture detection")
+            killSwitch.isActive.collect { isRunning ->
+                if (!isRunning) {
+                    Log.d(TAG, "Kill switch fired – stopping gesture detection")
                     stopGestureDetection()
                 }
             }
@@ -97,6 +102,8 @@ class FaceDetectionService : LifecycleService() {
 
             launch {
                 preferencesManager.getAllGestureMappings().collect { mappings ->
+                    // Assign a fresh immutable map so the camera thread never
+                    // iterates a map that is being mutated (Issue 12).
                     gestureMappings = mappings.associateBy { it.gesture }
                 }
             }
@@ -110,6 +117,8 @@ class FaceDetectionService : LifecycleService() {
             ACTION_START -> {
                 startForeground(NOTIFICATION_ID, createNotification())
                 startCamera()
+                voiceCommandHandler.startListening()
+                ServiceStateHolder.setRunning(true)
             }
 
             ACTION_STOP -> {
@@ -123,8 +132,8 @@ class FaceDetectionService : LifecycleService() {
     override fun onDestroy() {
         super.onDestroy()
         Log.d(TAG, "Service destroyed")
-
-        killSwitch.resume() // Clean up kill switch
+        ServiceStateHolder.setRunning(false)
+        voiceCommandHandler.stopListening()
         cameraExecutor.shutdown()
         serviceScope.cancel()
         faceDetector.close()
@@ -143,10 +152,10 @@ class FaceDetectionService : LifecycleService() {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
 
         cameraProviderFuture.addListener({
-            val cameraProvider = cameraProviderFuture.get()
+            val cameraProvider = cameraProviderFuture.get(5, TimeUnit.SECONDS)
 
-            val preview = Preview.Builder().build()
-
+            // No Preview use-case: this is a background service with no UI
+            // surface, so binding a Preview wastes GPU/camera resources (Issue 11).
             val imageAnalysis = ImageAnalysis.Builder()
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .build()
@@ -163,7 +172,6 @@ class FaceDetectionService : LifecycleService() {
                 cameraProvider.bindToLifecycle(
                     this,
                     cameraSelector,
-                    preview,
                     imageAnalysis
                 )
             } catch (e: Exception) {
@@ -178,7 +186,7 @@ class FaceDetectionService : LifecycleService() {
      */
     @androidx.camera.core.ExperimentalGetImage
     private fun processImageProxy(imageProxy: ImageProxy) {
-        // Check kill switch first - don't process if deactivated
+        // isActive=false means detection is STOPPED (Issue 5 naming fix)
         if (!killSwitch.isActive.value) {
             imageProxy.close()
             return
@@ -229,9 +237,9 @@ class FaceDetectionService : LifecycleService() {
         // Check kill switch first - track blinks for triple blink detection
         killSwitch.onBlinkDetected(gesture)
 
-        // Don't process gestures if kill switch is deactivated
+        // isActive=false means detection is STOPPED – guard label fixed (Issue 5)
         if (!killSwitch.isActive.value) {
-            Log.d(TAG, "Kill switch is active - ignoring gesture: ${gesture.name}")
+            Log.d(TAG, "Detection stopped by kill switch – ignoring gesture: ${gesture.name.replace("\n", " ").replace("\r", " ")}")
             return
         }
 
@@ -242,7 +250,7 @@ class FaceDetectionService : LifecycleService() {
             return
         }
 
-        Log.d(TAG, "Gesture detected: ${gesture.name} -> Action: ${mapping.action.name}")
+        Log.d(TAG, "Gesture detected: ${gesture.name.replace("\n", " ").replace("\r", " ")} -> Action: ${mapping.action.name.replace("\n", " ").replace("\r", " ")}")
 
         val accessibilityService = FaceNavAccessibilityService.getInstance()
         if (accessibilityService == null) {
@@ -259,8 +267,8 @@ class FaceDetectionService : LifecycleService() {
     private fun stopGestureDetection() {
         Log.d(TAG, "Stopping gesture detection")
         isProcessing = false
-        // Optionally stop the service entirely
-        // stopSelf()
+        // Stop the service so the camera is fully released (Issue 18)
+        stopSelf()
     }
 
     /**

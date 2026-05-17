@@ -17,22 +17,24 @@ class FaceNavAccessibilityService : AccessibilityService() {
 
     companion object {
         private const val TAG = "FaceNavAccessService"
-        private var instance: FaceNavAccessibilityService? = null
+        // WeakReference prevents a stale service instance from leaking the
+        // entire service context if the system restarts the service (Issue 9).
+        private var instanceRef = java.lang.ref.WeakReference<FaceNavAccessibilityService>(null)
 
-        fun getInstance(): FaceNavAccessibilityService? = instance
+        fun getInstance(): FaceNavAccessibilityService? = instanceRef.get()
 
-        fun isServiceEnabled(): Boolean = instance != null
+        fun isServiceEnabled(): Boolean = instanceRef.get() != null
     }
 
     override fun onCreate() {
         super.onCreate()
-        instance = this
+        instanceRef = java.lang.ref.WeakReference(this)
         Log.d(TAG, "FaceNav Accessibility Service Created")
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        instance = null
+        instanceRef.clear()
         Log.d(TAG, "FaceNav Accessibility Service Destroyed")
     }
 
@@ -54,7 +56,8 @@ class FaceNavAccessibilityService : AccessibilityService() {
      * Perform an accessibility action
      */
     fun performAction(action: AccessibilityAction): Boolean {
-        Log.d(TAG, "Performing action: ${action.name}")
+        if (!isServiceEnabled()) return false
+        Log.d(TAG, "Performing action: ${action.name.replace("\n", " ").replace("\r", " ")}")
 
         return try {
             when (action) {

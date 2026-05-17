@@ -31,6 +31,27 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 class EmergencyKillSwitch(private val context: Context) {
 
+    companion object {
+        private const val TAG = "EmergencyKillSwitch"
+        const val NOTIFICATION_ID = 999
+        const val CHANNEL_ID = "EmergencyKillSwitchChannel"
+        private const val TRIPLE_BLINK_WINDOW_MS = 2000L
+
+        const val ACTION_EMERGENCY_STOP = "com.example.facenav.ACTION_EMERGENCY_STOP"
+        const val ACTION_RESUME = "com.example.facenav.ACTION_RESUME"
+
+        @Volatile
+        private var instance: EmergencyKillSwitch? = null
+
+        fun getInstance(): EmergencyKillSwitch? = instance
+
+        fun getOrCreate(context: Context): EmergencyKillSwitch {
+            return instance ?: synchronized(this) {
+                instance ?: EmergencyKillSwitch(context.applicationContext).also { instance = it }
+            }
+        }
+    }
+
     private val _isActive = MutableStateFlow(true)
     val isActive: StateFlow<Boolean> = _isActive.asStateFlow()
 
@@ -43,15 +64,7 @@ class EmergencyKillSwitch(private val context: Context) {
     private var voiceCommandEnabled = true
     private var notificationEnabled = true
 
-    companion object {
-        private const val TAG = "EmergencyKillSwitch"
-        const val NOTIFICATION_ID = 999
-        const val CHANNEL_ID = "EmergencyKillSwitchChannel"
-        private const val TRIPLE_BLINK_WINDOW_MS = 2000L
 
-        const val ACTION_EMERGENCY_STOP = "ACTION_EMERGENCY_STOP"
-        const val ACTION_RESUME = "ACTION_RESUME"
-    }
 
     // ─── Core API ──────────────────────────────────────────────────────────────
 
@@ -89,7 +102,8 @@ class EmergencyKillSwitch(private val context: Context) {
      */
     fun checkVoiceCommand(text: String): Boolean {
         if (!voiceCommandEnabled) return false
-        val lower = text.lowercase().trim()
+        val sanitized = text.replace("\n", " ").replace("\r", " ").trim()
+        val lower = sanitized.lowercase()
 
         val stopWords = listOf(
             "stop facenav", "emergency stop", "stop face nav",
@@ -111,7 +125,7 @@ class EmergencyKillSwitch(private val context: Context) {
      */
     fun activate(reason: String) {
         if (!_isActive.value) { Log.d(TAG, "Already stopped"); return }
-        Log.d(TAG, "Kill switch ACTIVATED – $reason")
+        Log.d(TAG, "Kill switch ACTIVATED – ${reason.replace("\n", " ").replace("\r", " ")}")
         _isActive.value = false
 
         vibrateDevice(longArrayOf(0, 150, 80, 150))   // double-pulse
@@ -177,6 +191,7 @@ class EmergencyKillSwitch(private val context: Context) {
 
     /** Dismissible notification shown after kill switch fires – has a "Resume" button. */
     private fun showActivatedNotification(reason: String) {
+        val safeReason = reason.replace("\n", " ").replace("\r", " ")
         createNotificationChannel()
 
         val pi = PendingIntent.getBroadcast(
@@ -189,7 +204,7 @@ class EmergencyKillSwitch(private val context: Context) {
             NOTIFICATION_ID,
             NotificationCompat.Builder(context, CHANNEL_ID)
                 .setContentTitle("FaceNav Stopped")
-                .setContentText("Stopped by: $reason – tap Resume to restart")
+                .setContentText("Stopped by: $safeReason – tap Resume to restart")
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setOngoing(false)
@@ -264,3 +279,15 @@ data class KillSwitchSettings(
     val voiceCommandEnabled: Boolean = true,
     val notificationEnabled: Boolean = true
 )
+
+/**
+ * Single source of truth for whether FaceDetectionService is running.
+ * Written by the service itself; observed by HomeScreen and TestModeScreen
+ * so their UI always reflects the real state (Issues 2 & 3).
+ */
+object ServiceStateHolder {
+    private val _isRunning = MutableStateFlow(false)
+    val isRunning: StateFlow<Boolean> = _isRunning.asStateFlow()
+
+    fun setRunning(running: Boolean) { _isRunning.value = running }
+}

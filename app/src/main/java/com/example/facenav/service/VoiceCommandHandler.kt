@@ -74,12 +74,24 @@ class VoiceCommandHandler(
                 Log.e(TAG, "Speech recognition error: $error")
                 isListening = false
 
-                // Restart listening after error (except for client errors)
-                if (error != SpeechRecognizer.ERROR_CLIENT) {
-                    // Restart after a short delay
+                // Only restart on transient errors where the recogniser is
+                // still usable. ERROR_SPEECH_TIMEOUT and ERROR_NO_MATCH are
+                // normal "no speech detected" conditions and must NOT trigger
+                // an immediate restart loop (Issue 16).
+                val restartable = error == SpeechRecognizer.ERROR_NETWORK ||
+                        error == SpeechRecognizer.ERROR_NETWORK_TIMEOUT ||
+                        error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY ||
+                        error == SpeechRecognizer.ERROR_SERVER
+
+                if (restartable) {
                     android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                         startListening()
-                    }, 1000)
+                    }, 2000)
+                } else if (error != SpeechRecognizer.ERROR_CLIENT) {
+                    // For no-speech / no-match, wait longer before retrying
+                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                        startListening()
+                    }, 5000)
                 }
             }
 
@@ -101,7 +113,8 @@ class VoiceCommandHandler(
             private fun handleResults(results: Bundle?) {
                 results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     ?.forEach { text ->
-                        Log.d(TAG, "Recognized: $text")
+                        val safe = text.replace("\n", " ").replace("\r", " ")
+                        Log.d(TAG, "Recognized: $safe")
                         if (killSwitch.checkVoiceCommand(text)) {
                             Log.d(TAG, "Kill switch triggered by voice!")
                         }

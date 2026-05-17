@@ -1,14 +1,13 @@
 package com.example.facenav.ui.screens
 
 import androidx.compose.animation.*
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -27,15 +26,8 @@ import com.example.facenav.service.FaceNavAccessibilityService
 @Composable
 fun EmergencyKillSwitchScreen(navController: NavController) {
     val context = LocalContext.current
-
-    // Use the singleton from the running service when available;
-    // fall back to a fresh instance (for settings editing when service is idle).
-    val killSwitch = remember { EmergencyKillSwitch(context) }
-
-    // Live detection state – updates whenever the service fires activate() / resume()
+    val killSwitch = remember { EmergencyKillSwitch.getOrCreate(context) }
     val isRunning by killSwitch.isActive.collectAsState()
-
-    // Local UI state for the three toggles
     var settings by remember { mutableStateOf(killSwitch.getSettings()) }
 
     Scaffold(
@@ -43,7 +35,7 @@ fun EmergencyKillSwitchScreen(navController: NavController) {
             TopAppBar(
                 title = {
                     Column {
-                        Text("Emergency Kill Switch")
+                        Text("Emergency Stop", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                         Text(
                             "Multiple ways to stop instantly",
                             style = MaterialTheme.typography.bodySmall,
@@ -53,12 +45,10 @@ fun EmergencyKillSwitchScreen(navController: NavController) {
                 },
                 navigationIcon = {
                     IconButton(onClick = { navController.navigateUp() }) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.Outlined.ArrowBack, contentDescription = "Back")
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                )
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
             )
         }
     ) { padding ->
@@ -67,65 +57,62 @@ fun EmergencyKillSwitchScreen(navController: NavController) {
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
+            Spacer(Modifier.height(4.dp))
 
-            // ── Status Hero Card ──────────────────────────────────────────────
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = if (isRunning)
-                        MaterialTheme.colorScheme.primaryContainer
-                    else
-                        MaterialTheme.colorScheme.errorContainer
-                )
+            // ── Status hero card ──────────────────────────────────────────────
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = if (isRunning) MaterialTheme.colorScheme.primaryContainer
+                else MaterialTheme.colorScheme.errorContainer,
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
                     modifier = Modifier.padding(24.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(80.dp)
-                            .background(
-                                (if (isRunning) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.error).copy(alpha = 0.18f),
-                                CircleShape
-                            ),
-                        contentAlignment = Alignment.Center
+                    Surface(
+                        modifier = Modifier.size(64.dp),
+                        shape = RoundedCornerShape(18.dp),
+                        color = if (isRunning) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.error
                     ) {
                         Icon(
-                            imageVector = if (isRunning) Icons.Default.Shield else Icons.Default.Warning,
+                            imageVector = if (isRunning) Icons.Outlined.Shield else Icons.Outlined.Warning,
                             contentDescription = null,
-                            modifier = Modifier.size(40.dp),
-                            tint = if (isRunning) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.error
+                            modifier = Modifier.padding(16.dp),
+                            tint = if (isRunning) MaterialTheme.colorScheme.onPrimary
+                            else MaterialTheme.colorScheme.onError
                         )
                     }
 
-                    Text(
-                        text = if (isRunning) "Detection Active" else "Detection Stopped",
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isRunning) MaterialTheme.colorScheme.onPrimaryContainer
-                        else MaterialTheme.colorScheme.onErrorContainer
-                    )
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            if (isRunning) "Detection Active" else "Detection Stopped",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isRunning) MaterialTheme.colorScheme.onPrimaryContainer
+                            else MaterialTheme.colorScheme.onErrorContainer
+                        )
+                        Text(
+                            if (isRunning)
+                                "FaceNav is running. Use any method below to stop instantly."
+                            else
+                                "FaceNav has been stopped. Tap Resume to restart.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = (if (isRunning) MaterialTheme.colorScheme.onPrimaryContainer
+                            else MaterialTheme.colorScheme.onErrorContainer).copy(alpha = 0.75f),
+                            textAlign = TextAlign.Center
+                        )
+                    }
 
-                    Text(
-                        text = if (isRunning)
-                            "FaceNav is running. Use any method below to stop gesture detection instantly."
-                        else
-                            "FaceNav has been stopped. Tap Resume to restart gesture detection.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = (if (isRunning) MaterialTheme.colorScheme.onPrimaryContainer
-                        else MaterialTheme.colorScheme.onErrorContainer).copy(alpha = 0.8f),
-                        textAlign = TextAlign.Center
-                    )
-
-                    // Manual stop / resume button
                     Button(
                         onClick = {
                             if (isRunning) killSwitch.activate("Manual Button")
@@ -135,47 +122,46 @@ fun EmergencyKillSwitchScreen(navController: NavController) {
                             containerColor = if (isRunning) MaterialTheme.colorScheme.error
                             else MaterialTheme.colorScheme.primary
                         ),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().height(48.dp)
                     ) {
                         Icon(
-                            imageVector = if (isRunning) Icons.Default.Stop else Icons.Default.PlayArrow,
+                            imageVector = if (isRunning) Icons.Outlined.Stop else Icons.Outlined.PlayArrow,
                             contentDescription = null,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(18.dp)
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            text = if (isRunning) "Stop Now" else "Resume Detection",
+                            if (isRunning) "Stop Now" else "Resume Detection",
                             fontWeight = FontWeight.SemiBold
                         )
                     }
                 }
             }
 
-            // ── Stop Methods ──────────────────────────────────────────────────
+            // ── Stop methods label ────────────────────────────────────────────
             Text(
-                text = "Stop Methods",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(top = 4.dp)
+                "Stop Methods",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            // 1. Triple Blink
+            // ── Triple Blink ──────────────────────────────────────────────────
             KillSwitchMethodCard(
-                icon = Icons.Default.RemoveRedEye,
+                icon = Icons.Outlined.RemoveRedEye,
                 title = "Triple Blink",
                 description = "Blink 3 times within 2 seconds to stop immediately",
                 enabled = settings.tripleBlinkEnabled,
                 onToggle = { on ->
                     val s = settings.copy(tripleBlinkEnabled = on)
                     settings = s; killSwitch.updateSettings(s)
-                },
-                iconBackgroundColor = MaterialTheme.colorScheme.primaryContainer,
-                iconTint = MaterialTheme.colorScheme.primary
+                }
             )
 
-            // 2. Voice Command
+            // ── Voice Command ─────────────────────────────────────────────────
             KillSwitchMethodCard(
-                icon = Icons.Default.Mic,
+                icon = Icons.Outlined.Mic,
                 title = "Voice Command",
                 description = "Say a command to stop or resume FaceNav",
                 enabled = settings.voiceCommandEnabled,
@@ -183,34 +169,32 @@ fun EmergencyKillSwitchScreen(navController: NavController) {
                     val s = settings.copy(voiceCommandEnabled = on)
                     settings = s; killSwitch.updateSettings(s)
                 },
-                iconBackgroundColor = MaterialTheme.colorScheme.secondaryContainer,
-                iconTint = MaterialTheme.colorScheme.secondary,
                 extraContent = {
                     if (settings.voiceCommandEnabled) {
                         Spacer(Modifier.height(12.dp))
-                        Card(
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
-                            ),
-                            shape = RoundedCornerShape(12.dp)
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surface
                         ) {
                             Column(
-                                modifier = Modifier.padding(16.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                                modifier = Modifier.padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Text(
-                                    "Stop Commands:",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = FontWeight.Bold
+                                    "Stop Commands",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 CommandChip("\"Stop FaceNav\"")
                                 CommandChip("\"Emergency Stop\"")
                                 CommandChip("\"Halt FaceNav\"")
                                 Spacer(Modifier.height(4.dp))
                                 Text(
-                                    "Resume Commands:",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = FontWeight.Bold
+                                    "Resume Commands",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 CommandChip("\"Resume FaceNav\"")
                                 CommandChip("\"Start FaceNav\"")
@@ -220,58 +204,47 @@ fun EmergencyKillSwitchScreen(navController: NavController) {
                 }
             )
 
-            // 3. Notification Button
+            // ── Notification Button ───────────────────────────────────────────
             KillSwitchMethodCard(
-                icon = Icons.Default.Notifications,
+                icon = Icons.Outlined.Notifications,
                 title = "Notification Button",
                 description = "Tap \"Emergency Stop\" in the notification shade at any time",
                 enabled = settings.notificationEnabled,
                 onToggle = { on ->
                     val s = settings.copy(notificationEnabled = on)
                     settings = s; killSwitch.updateSettings(s)
-                },
-                iconBackgroundColor = MaterialTheme.colorScheme.tertiaryContainer,
-                iconTint = MaterialTheme.colorScheme.tertiary
+                }
             )
 
-            // ── Info Card ─────────────────────────────────────────────────────
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                )
+            // ── Info card ─────────────────────────────────────────────────────
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
-                    modifier = Modifier.padding(20.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    modifier = Modifier.padding(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.Top
                 ) {
                     Icon(
-                        Icons.Default.Info, contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(24.dp)
+                        Icons.Outlined.Info,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            "How It Works",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            "Any enabled method stops gesture detection instantly and triggers a vibration pulse. " +
-                                    "Resume from the notification shade, the button above, or via a voice resume command. " +
-                                    "Keep at least one method enabled at all times.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                    Text(
+                        "Any enabled method stops gesture detection instantly and triggers a vibration pulse. Keep at least one method enabled at all times.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
-
-            Spacer(Modifier.height(60.dp))
         }
     }
 }
+
+// ── Kill Switch Method Card ───────────────────────────────────────────────────
 
 @Composable
 fun KillSwitchMethodCard(
@@ -280,58 +253,50 @@ fun KillSwitchMethodCard(
     description: String,
     enabled: Boolean,
     onToggle: (Boolean) -> Unit,
-    iconBackgroundColor: Color,
-    iconTint: Color,
+    iconBackgroundColor: Color = Color.Unspecified,
+    iconTint: Color = Color.Unspecified,
     extraContent: @Composable (() -> Unit)? = null
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (enabled) MaterialTheme.colorScheme.surface
-            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = if (enabled) 2.dp else 0.dp)
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = if (enabled) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+        shadowElevation = if (enabled) 1.dp else 0.dp,
+        modifier = Modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.padding(20.dp)) {
+        Column(modifier = Modifier.padding(16.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(56.dp)
-                        .background(
-                            color = if (enabled) iconBackgroundColor
-                            else MaterialTheme.colorScheme.surfaceVariant,
-                            shape = RoundedCornerShape(16.dp)
-                        ),
-                    contentAlignment = Alignment.Center
+                Surface(
+                    modifier = Modifier.size(44.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (enabled) MaterialTheme.colorScheme.primaryContainer
+                    else MaterialTheme.colorScheme.surfaceVariant
                 ) {
                     Icon(
-                        icon, contentDescription = null,
-                        modifier = Modifier.size(28.dp),
-                        tint = if (enabled) iconTint
+                        icon,
+                        contentDescription = null,
+                        modifier = Modifier.padding(10.dp),
+                        tint = if (enabled) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
                     )
                 }
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
-                        text = title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
+                        title,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
                         color = if (enabled) MaterialTheme.colorScheme.onSurface
-                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
                     )
                     Text(
-                        text = description,
+                        description,
                         style = MaterialTheme.typography.bodySmall,
-                        color = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant
-                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                            alpha = if (enabled) 0.8f else 0.4f
+                        )
                     )
                 }
                 Switch(
@@ -348,15 +313,17 @@ fun KillSwitchMethodCard(
     }
 }
 
+// ── Command Chip ──────────────────────────────────────────────────────────────
+
 @Composable
 fun CommandChip(text: String) {
     Surface(
-        shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+        shape = RoundedCornerShape(6.dp),
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
     ) {
         Text(
-            text = text,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            text,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
             style = MaterialTheme.typography.bodySmall,
             fontWeight = FontWeight.Medium,
             color = MaterialTheme.colorScheme.onSurface

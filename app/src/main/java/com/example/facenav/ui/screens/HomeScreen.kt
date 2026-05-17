@@ -6,47 +6,51 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.navigation.NavController
 import com.example.facenav.data.PreferencesManager
+import com.example.facenav.model.AccessibilityAction
+import com.example.facenav.model.GestureMapping
 import com.example.facenav.model.SensitivityLevel
 import com.example.facenav.service.FaceDetectionService
 import com.example.facenav.service.FaceNavAccessibilityService
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+import com.example.facenav.service.ServiceStateHolder
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(navController: NavController) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val lifecycleOwner = LocalLifecycleOwner.current
     val preferencesManager = remember { PreferencesManager(context) }
 
     val settings by preferencesManager.getSettings().collectAsState(initial = null)
-    var isServiceRunning by remember { mutableStateOf(false) }
+    val gestureMappings by preferencesManager.getAllGestureMappings().collectAsState(initial = emptyList())
+    val isServiceRunning by ServiceStateHolder.isRunning.collectAsState()
     var isAccessibilityEnabled by remember {
         mutableStateOf(FaceNavAccessibilityService.isServiceEnabled())
     }
 
-    // Auto-refresh accessibility service status
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
@@ -57,54 +61,34 @@ fun HomeScreen(navController: NavController) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    LaunchedEffect(Unit) {
-        while (true) {
-            isAccessibilityEnabled = FaceNavAccessibilityService.isServiceEnabled()
-            delay(1000)
-        }
-    }
+    val isActive = isServiceRunning && isAccessibilityEnabled
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Surface(
-                            modifier = Modifier.size(40.dp),
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.primaryContainer
-                        ) {
-                            Icon(
-                                Icons.Filled.Face,
-                                contentDescription = null,
-                                modifier = Modifier.padding(8.dp),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                        Column {
-                            Text(
-                                "FaceNav",
-                                style = MaterialTheme.typography.titleLarge,
+                    Text(
+                        text = buildAnnotatedString {
+                            withStyle(SpanStyle(
+                                color = MaterialTheme.colorScheme.onSurface,
                                 fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
+                            )) { append("Face") }
+                            withStyle(SpanStyle(
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold
+                            )) { append("Nav") }
+                        },
+                        style = MaterialTheme.typography.titleLarge
+                    )
                 },
                 actions = {
-                    // Emergency Kill Switch Button
-                    IconButton(
-                        onClick = { navController.navigate("emergency_killswitch") }
-                    ) {
+                    IconButton(onClick = { navController.navigate("emergency_killswitch") }) {
                         Icon(
-                            Icons.Default.Warning,
+                            Icons.Outlined.Shield,
                             contentDescription = "Emergency Kill Switch",
                             tint = MaterialTheme.colorScheme.error
                         )
                     }
-
                     IconButton(onClick = { navController.navigate("settings") }) {
                         Icon(Icons.Outlined.Settings, contentDescription = "Settings")
                     }
@@ -123,7 +107,7 @@ fun HomeScreen(navController: NavController) {
                     icon = { Icon(Icons.Outlined.Home, contentDescription = null) },
                     label = { Text("Home") },
                     selected = true,
-                    onClick = { }
+                    onClick = {}
                 )
                 NavigationBarItem(
                     icon = { Icon(Icons.Outlined.TouchApp, contentDescription = null) },
@@ -144,162 +128,183 @@ fun HomeScreen(navController: NavController) {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .padding(horizontal = 20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(Modifier.height(4.dp))
 
-            // Status Hero Section
+            // ── Hero status card ──────────────────────────────────────────
             StatusHeroCard(
-                isActive = isServiceRunning && isAccessibilityEnabled,
-                isAccessibilityEnabled = isAccessibilityEnabled
+                isActive = isActive,
+                isAccessibilityEnabled = isAccessibilityEnabled,
+                isServiceRunning = isServiceRunning,
+                onToggle = {
+                    if (isServiceRunning) stopFaceDetection(context)
+                    else startFaceDetection(context)
+                }
             )
 
-            // Accessibility Service Setup
+            // ── Accessibility banner ──────────────────────────────────────
             AnimatedVisibility(
                 visible = !isAccessibilityEnabled,
                 enter = expandVertically() + fadeIn(),
                 exit = shrinkVertically() + fadeOut()
             ) {
-                AccessibilitySetupCard(context)
+                AccessibilityBanner(context)
             }
 
-            // Control Button
-            if (isAccessibilityEnabled) {
-                ControlButton(
-                    isRunning = isServiceRunning,
-                    onToggle = {
-                        if (isServiceRunning) {
-                            stopFaceDetection(context)
-                            isServiceRunning = false
-                        } else {
-                            startFaceDetection(context)
-                            isServiceRunning = true
-                        }
-                    }
-                )
+            // ── Active gestures preview ───────────────────────────────────
+            val activeGestures = gestureMappings.filter {
+                it.enabled && it.action != AccessibilityAction.NONE
+            }
+            if (activeGestures.isNotEmpty()) {
+                ActiveGesturesSection(activeGestures)
             }
 
-            Spacer(modifier = Modifier.weight(1f))
-
-            // Settings Preview Card
+            // ── Settings summary card ─────────────────────────────────────
             settings?.let {
-                SettingsPreviewCard(
+                SettingsSummaryCard(
                     sensitivity = it.sensitivity,
-                    cooldown = it.cooldownMs
+                    cooldown = it.cooldownMs,
+                    haptic = it.hapticFeedback,
+                    onNavigate = { navController.navigate("settings") }
                 )
             }
-
-            Spacer(modifier = Modifier.height(8.dp))
         }
     }
 }
+
+// ── Hero Status Card ──────────────────────────────────────────────────────────
 
 @Composable
 fun StatusHeroCard(
     isActive: Boolean,
-    isAccessibilityEnabled: Boolean
+    isAccessibilityEnabled: Boolean,
+    isServiceRunning: Boolean,
+    onToggle: () -> Unit
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    val scale by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.05f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1000, easing = EaseInOut),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "scale"
+    val cardColor = if (isActive)
+        MaterialTheme.colorScheme.primaryContainer
+    else
+        MaterialTheme.colorScheme.surfaceVariant
+
+    val btnColor by animateColorAsState(
+        targetValue = if (isServiceRunning) MaterialTheme.colorScheme.error
+        else MaterialTheme.colorScheme.primary,
+        label = "btnColor"
     )
 
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(280.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isActive) {
-                MaterialTheme.colorScheme.primaryContainer
-            } else {
-                MaterialTheme.colorScheme.surfaceVariant
-            }
-        )
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = cardColor,
+        modifier = Modifier.fillMaxWidth()
     ) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
+        Column(
+            modifier = Modifier.padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(20.dp),
-                modifier = Modifier.padding(32.dp)
+            // Status pill + icon row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
             ) {
-                // Animated Icon
-                Box(
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (isActive) {
-                        Surface(
-                            modifier = Modifier
-                                .size(120.dp)
-                                .scale(scale),
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
-                        ) {}
-                    }
-
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    // Pill
                     Surface(
-                        modifier = Modifier.size(100.dp),
-                        shape = CircleShape,
-                        color = if (isActive) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.outline
-                        }
+                        shape = RoundedCornerShape(50),
+                        color = if (isActive)
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                        else
+                            MaterialTheme.colorScheme.outline.copy(alpha = 0.12f)
                     ) {
-                        Icon(
-                            imageVector = if (isActive) {
-                                Icons.Filled.Visibility
-                            } else {
-                                Icons.Filled.VisibilityOff
-                            },
-                            contentDescription = null,
-                            modifier = Modifier.padding(28.dp),
-                            tint = if (isActive) {
-                                MaterialTheme.colorScheme.onPrimary
-                            } else {
-                                MaterialTheme.colorScheme.surface
-                            }
-                        )
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .background(
+                                        color = if (isActive) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.outline,
+                                        shape = RoundedCornerShape(50)
+                                    )
+                            )
+                            Text(
+                                text = if (isActive) "Active" else "Inactive",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (isActive) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
-                }
 
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
                     Text(
-                        text = if (isActive) "Detection Active" else "Detection Inactive",
+                        text = if (isActive) "Detection\nRunning" else "Detection\nStopped",
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold,
-                        color = if (isActive) {
-                            MaterialTheme.colorScheme.onPrimaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        }
+                        color = if (isActive) MaterialTheme.colorScheme.onPrimaryContainer
+                        else MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
                     Text(
                         text = when {
-                            !isAccessibilityEnabled -> "Enable accessibility service to continue"
-                            !isActive -> "Ready to detect facial gestures"
-                            else -> "Monitoring your gestures"
+                            !isAccessibilityEnabled -> "Accessibility service required"
+                            !isServiceRunning -> "Tap Start to begin"
+                            else -> "Monitoring facial gestures"
                         },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (isActive) {
-                            MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        }
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (isActive)
+                            MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                        else
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                    )
+                }
+
+                // Icon badge
+                Surface(
+                    modifier = Modifier.size(64.dp),
+                    shape = RoundedCornerShape(18.dp),
+                    color = if (isActive)
+                        MaterialTheme.colorScheme.primary
+                    else
+                        MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                ) {
+                    Icon(
+                        imageVector = if (isActive) Icons.Outlined.Visibility else Icons.Outlined.VisibilityOff,
+                        contentDescription = null,
+                        modifier = Modifier.padding(16.dp),
+                        tint = if (isActive) MaterialTheme.colorScheme.onPrimary
+                        else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            // Control button
+            if (isAccessibilityEnabled) {
+                Button(
+                    onClick = onToggle,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = btnColor),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isServiceRunning) Icons.Outlined.Stop else Icons.Outlined.PlayArrow,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = if (isServiceRunning) "Stop Detection" else "Start Detection",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold
                     )
                 }
             }
@@ -307,197 +312,237 @@ fun StatusHeroCard(
     }
 }
 
-@Composable
-fun AccessibilitySetupCard(context: Context) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer
-        )
-    ) {
-        Column(
-            modifier = Modifier.padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Row(
-                verticalAlignment = Alignment.Top,
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Icon(
-                    Icons.Filled.Warning,
-                    contentDescription = null,
-                    modifier = Modifier.size(28.dp),
-                    tint = MaterialTheme.colorScheme.error
-                )
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "Accessibility Required",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onErrorContainer
-                    )
-                    Text(
-                        text = "FaceNav needs accessibility permission to perform actions like tapping, scrolling, and navigation based on your facial gestures.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.9f)
-                    )
-                }
-            }
-
-            Button(
-                onClick = {
-                    val intent = Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                    context.startActivity(intent)
-                },
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.error
-                )
-            ) {
-                Icon(Icons.Filled.Settings, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Open Accessibility Settings")
-            }
-        }
-    }
-}
+// ── Accessibility Banner ──────────────────────────────────────────────────────
 
 @Composable
-fun ControlButton(
-    isRunning: Boolean,
-    onToggle: () -> Unit
-) {
-    val backgroundColor by animateColorAsState(
-        targetValue = if (isRunning) {
-            MaterialTheme.colorScheme.error
-        } else {
-            MaterialTheme.colorScheme.primary
-        },
-        label = "background"
-    )
-
-    Button(
-        onClick = onToggle,
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(64.dp),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = backgroundColor
-        ),
-        shape = MaterialTheme.shapes.large
-    ) {
-        Icon(
-            imageVector = if (isRunning) Icons.Filled.Stop else Icons.Filled.PlayArrow,
-            contentDescription = null,
-            modifier = Modifier.size(28.dp)
-        )
-        Spacer(modifier = Modifier.width(12.dp))
-        Text(
-            text = if (isRunning) "Stop Detection" else "Start Detection",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold
-        )
-    }
-}
-
-@Composable
-fun SettingsPreviewCard(
-    sensitivity: SensitivityLevel,
-    cooldown: Long
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer
-        )
-    ) {
-        Column(
-            modifier = Modifier.padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Text(
-                text = "Current Settings",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSecondaryContainer
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                SettingItem(
-                    icon = Icons.Outlined.Tune,
-                    label = "Sensitivity",
-                    value = sensitivity.getDisplayName(),
-                    modifier = Modifier.weight(1f)
-                )
-                SettingItem(
-                    icon = Icons.Outlined.Timer,
-                    label = "Cooldown",
-                    value = "${cooldown}ms",
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun SettingItem(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    value: String,
-    modifier: Modifier = Modifier
-) {
+fun AccessibilityBanner(context: Context) {
     Surface(
-        modifier = modifier,
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.errorContainer
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top
         ) {
             Icon(
-                icon,
+                Icons.Outlined.Info,
                 contentDescription = null,
                 modifier = Modifier.size(20.dp),
-                tint = MaterialTheme.colorScheme.primary
+                tint = MaterialTheme.colorScheme.error
             )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    "Accessibility Required",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+                Text(
+                    "FaceNav needs accessibility permission to perform tap, scroll, and navigation actions.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f)
+                )
+                TextButton(
+                    onClick = {
+                        context.startActivity(
+                            Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                        )
+                    },
+                    contentPadding = PaddingValues(0.dp),
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Text(
+                        "Open Settings",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Icon(
+                        Icons.Outlined.ArrowForward,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ── Active Gestures Preview ───────────────────────────────────────────────────
+
+@Composable
+fun ActiveGesturesSection(mappings: List<GestureMapping>) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
-            )
-            Text(
-                text = value,
-                style = MaterialTheme.typography.titleMedium,
+                "Active Gestures",
+                style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSecondaryContainer
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                "${mappings.size} mapped",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            items(mappings.take(6)) { mapping ->
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier.width(130.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer
+                        ) {
+                            Icon(
+                                imageVector = mapping.action.toIcon(),
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .padding(8.dp)
+                                    .size(18.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Text(
+                            mapping.gesture.getDisplayName(),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            mapping.action.getDisplayName(),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Settings Summary Card ─────────────────────────────────────────────────────
+
+@Composable
+fun SettingsSummaryCard(
+    sensitivity: SensitivityLevel,
+    cooldown: Long,
+    haptic: Boolean,
+    onNavigate: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "Settings",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+                TextButton(
+                    onClick = onNavigate,
+                    contentPadding = PaddingValues(0.dp),
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Text("Edit", style = MaterialTheme.typography.labelMedium)
+                    Icon(
+                        Icons.Outlined.ChevronRight,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                SettingItem(Icons.Outlined.Tune, "Sensitivity", sensitivity.getDisplayName())
+                SettingItem(Icons.Outlined.Timer, "Cooldown", "${cooldown}ms")
+                SettingItem(
+                    if (haptic) Icons.Outlined.Vibration else Icons.Outlined.PhoneDisabled,
+                    "Haptic",
+                    if (haptic) "On" else "Off"
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun SettingItem(icon: ImageVector, label: String, value: String) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            modifier = Modifier.size(15.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Column {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                value,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold
             )
         }
     }
 }
 
-fun SensitivityLevel.getDisplayName(): String {
-    return when (this) {
-        SensitivityLevel.LOW -> "Low"
-        SensitivityLevel.MEDIUM -> "Medium"
-        SensitivityLevel.HIGH -> "High"
-    }
+fun SensitivityLevel.getDisplayName(): String = when (this) {
+    SensitivityLevel.LOW -> "Low"
+    SensitivityLevel.MEDIUM -> "Medium"
+    SensitivityLevel.HIGH -> "High"
 }
 
 private fun startFaceDetection(context: Context) {
-    val intent = Intent(context, FaceDetectionService::class.java).apply {
-        action = FaceDetectionService.ACTION_START
-    }
-    context.startForegroundService(intent)
+    context.startForegroundService(
+        Intent(context, FaceDetectionService::class.java).apply {
+            action = FaceDetectionService.ACTION_START
+        }
+    )
 }
 
 private fun stopFaceDetection(context: Context) {
-    val intent = Intent(context, FaceDetectionService::class.java).apply {
+    context.stopService(Intent(context, FaceDetectionService::class.java).apply {
         action = FaceDetectionService.ACTION_STOP
-    }
-    context.stopService(intent)
+    })
 }

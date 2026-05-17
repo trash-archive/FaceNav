@@ -15,27 +15,20 @@ class KillSwitchReceiver : BroadcastReceiver() {
     }
 
     override fun onReceive(context: Context, intent: Intent) {
-        Log.d(TAG, "Received action: ${intent.action}")
+        val sanitizedAction = intent.action?.replace("\n", " ")?.replace("\r", " ") ?: ""
+        Log.d(TAG, "Received action: $sanitizedAction")
+
+        val killSwitch = EmergencyKillSwitch.getOrCreate(context)
 
         when (intent.action) {
             EmergencyKillSwitch.ACTION_EMERGENCY_STOP -> {
                 Log.d(TAG, "Emergency stop triggered from notification")
-
-                // Stop the face detection service
-                val stopIntent = Intent(context, FaceDetectionService::class.java).apply {
-                    action = FaceDetectionService.ACTION_STOP
-                }
-                context.stopService(stopIntent)
+                killSwitch.activate("Notification Button")
             }
 
             EmergencyKillSwitch.ACTION_RESUME -> {
                 Log.d(TAG, "Resume triggered from notification")
-
-                // Restart the face detection service
-                val startIntent = Intent(context, FaceDetectionService::class.java).apply {
-                    action = FaceDetectionService.ACTION_START
-                }
-                context.startForegroundService(startIntent)
+                killSwitch.resume()
             }
         }
     }

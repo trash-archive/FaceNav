@@ -16,6 +16,10 @@ class GestureDetector(private var settings: AppSettings) {
     private var wasEyesClosed = false
     private var wasLeftEyeClosed = false
     private var wasRightEyeClosed = false
+    // Tracks when a single blink candidate was recorded so we can fire it
+    // on the very next frame after the double-blink window expires,
+    // regardless of whether a face is still detected.
+    private var singleBlinkPendingTime = 0L
 
     // State tracking for head movements with nod protection
     private var lastHeadEulerY = 0f
@@ -81,69 +85,96 @@ class GestureDetector(private var settings: AppSettings) {
 
     /**
      * Detect blink gestures (single, double, left, right)
+     *
+     * Fix – Issue 6: individual eye blinks now require the OTHER eye to be
+     *   genuinely above EYE_OPEN_THRESHOLD, and both individual-eye flags are
+     *   cleared whenever both eyes close together so a normal blink never
+     *   accidentally triggers LEFT_BLINK / RIGHT_BLINK.
+     *
+     * Fix – Issue 7: SINGLE_BLINK is now driven by singleBlinkPendingTime so
+     *   it fires on the very next frame after the double-blink window expires,
+     *   even if the face briefly disappears between frames.
      */
     private fun detectBlink(face: Face, currentTime: Long): FacialGesture? {
-        val leftEyeOpen = face.leftEyeOpenProbability ?: return null
-        val rightEyeOpen = face.rightEyeOpenProbability ?: return null
+        val leftEyeOpen  = face.leftEyeOpenProbability  ?: return checkPendingSingleBlink(currentTime)
+        val rightEyeOpen = face.rightEyeOpenProbability ?: return checkPendingSingleBlink(currentTime)
 
         val avgEyeOpen = (leftEyeOpen + rightEyeOpen) / 2f
 
-        // Detect individual eye blinks
-        // Left eye blink (right eye stays open)
+        // When both eyes close together, cancel any pending individual-eye flags
+        // so a normal blink is never misread as LEFT_BLINK / RIGHT_BLINK.
+        if (leftEyeOpen < EYE_CLOSED_THRESHOLD && rightEyeOpen < EYE_CLOSED_THRESHOLD) {
+            wasLeftEyeClosed  = false
+            wasRightEyeClosed = false
+        }
+
+        // Left eye blink: left closed AND right genuinely open (above threshold)
         if (leftEyeOpen < EYE_CLOSED_THRESHOLD && rightEyeOpen > EYE_OPEN_THRESHOLD && !wasLeftEyeClosed) {
             wasLeftEyeClosed = true
-            return null
+            return checkPendingSingleBlink(currentTime)
         }
         if (leftEyeOpen > EYE_OPEN_THRESHOLD && wasLeftEyeClosed) {
             wasLeftEyeClosed = false
             return FacialGesture.LEFT_BLINK
         }
 
-        // Right eye blink (left eye stays open)
+        // Right eye blink: right closed AND left genuinely open (above threshold)
         if (rightEyeOpen < EYE_CLOSED_THRESHOLD && leftEyeOpen > EYE_OPEN_THRESHOLD && !wasRightEyeClosed) {
             wasRightEyeClosed = true
-            return null
+            return checkPendingSingleBlink(currentTime)
         }
         if (rightEyeOpen > EYE_OPEN_THRESHOLD && wasRightEyeClosed) {
             wasRightEyeClosed = false
             return FacialGesture.RIGHT_BLINK
         }
 
-        // Detect both eyes closure (for single/double blink)
+        // Both eyes closed – start tracking a both-eyes blink
         if (avgEyeOpen < EYE_CLOSED_THRESHOLD && !wasEyesClosed) {
             wasEyesClosed = true
-            return null
+            return checkPendingSingleBlink(currentTime)
         }
 
-        // Detect both eyes opening (blink completed)
+        // Both eyes opened again – blink completed
         if (avgEyeOpen > EYE_OPEN_THRESHOLD && wasEyesClosed) {
             wasEyesClosed = false
 
             val timeSinceLastBlink = currentTime - lastBlinkTime
 
-            // Check if this could be a double blink
             if (timeSinceLastBlink < settings.doubleBlinkWindowMs) {
                 blinkCount++
                 if (blinkCount >= 2) {
                     blinkCount = 0
                     lastBlinkTime = 0L
+                    singleBlinkPendingTime = 0L
                     return FacialGesture.DOUBLE_BLINK
                 }
             } else {
-                // Too long since last blink, reset count
                 blinkCount = 1
             }
 
             lastBlinkTime = currentTime
+            singleBlinkPendingTime = currentTime   // arm the single-blink timer
             return null
         }
 
-        // Check if single blink window has passed
-        if (blinkCount == 1 && currentTime - lastBlinkTime > settings.doubleBlinkWindowMs) {
+        return checkPendingSingleBlink(currentTime)
+    }
+
+    /**
+     * Returns SINGLE_BLINK if a blink candidate is pending and the
+     * double-blink window has now expired; otherwise returns null.
+     * Resets all blink state after firing.
+     */
+    private fun checkPendingSingleBlink(currentTime: Long): FacialGesture? {
+        if (singleBlinkPendingTime > 0L &&
+            blinkCount == 1 &&
+            currentTime - singleBlinkPendingTime > settings.doubleBlinkWindowMs
+        ) {
             blinkCount = 0
+            lastBlinkTime = 0L
+            singleBlinkPendingTime = 0L
             return FacialGesture.SINGLE_BLINK
         }
-
         return null
     }
 
@@ -219,23 +250,25 @@ class GestureDetector(private var settings: AppSettings) {
 
         val smilingProbability = face.smilingProbability ?: return null
 
-        // Detect smile
+        // Detect smile – Issue 14 fix: return immediately after firing so
+        // MOUTH_OPEN (which uses the inverse probability) can never fire on
+        // the same frame.
         val smileThreshold = settings.smileThreshold
         if (smilingProbability > smileThreshold && !wasSmiling) {
             wasSmiling = true
+            wasMouthOpen = false   // ensure mouth-open state is cleared
             return FacialGesture.SMILE
         }
         if (smilingProbability < smileThreshold - 0.1f && wasSmiling) {
             wasSmiling = false
         }
 
-        // Note: Mouth open detection would require additional processing
-        // of face contours or a custom ML model. For now, we'll detect it
-        // based on face height changes or use smiling as inverse
+        // MOUTH_OPEN approximated as inverse of smiling probability.
+        // Only evaluated when smile is NOT active (wasSmiling == false).
         val mouthOpenApprox = 1.0f - smilingProbability
         val mouthThreshold = settings.mouthOpenThreshold
 
-        if (mouthOpenApprox > mouthThreshold && !wasMouthOpen) {
+        if (mouthOpenApprox > mouthThreshold && !wasMouthOpen && !wasSmiling) {
             wasMouthOpen = true
             return FacialGesture.MOUTH_OPEN
         }
@@ -267,6 +300,7 @@ class GestureDetector(private var settings: AppSettings) {
     fun reset() {
         lastBlinkTime = 0L
         blinkCount = 0
+        singleBlinkPendingTime = 0L
         wasEyesClosed = false
         wasLeftEyeClosed = false
         wasRightEyeClosed = false

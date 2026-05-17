@@ -51,6 +51,7 @@ class PreferencesManager(private val context: Context) {
         private val HAPTIC_FEEDBACK = booleanPreferencesKey("haptic_feedback")
         private val SOUND_FEEDBACK = booleanPreferencesKey("sound_feedback")
         private val CAMERA_PREVIEW = booleanPreferencesKey("camera_preview")
+        private val HAS_SEEN_ONBOARDING = booleanPreferencesKey("has_seen_onboarding")
 
         // Default mappings
         private val DEFAULT_MAPPINGS = mapOf(
@@ -210,5 +211,12 @@ class PreferencesManager(private val context: Context) {
             FacialGesture.MOUTH_OPEN -> ENABLED_MOUTH_OPEN
             FacialGesture.SMILE -> ENABLED_SMILE
         }
+    }
+
+    fun hasSeenOnboarding(): Flow<Boolean> =
+        dataStore.data.map { it[HAS_SEEN_ONBOARDING] ?: false }
+
+    suspend fun setOnboardingSeen() {
+        dataStore.edit { it[HAS_SEEN_ONBOARDING] = true }
     }
 }

@@ -1,11 +1,11 @@
 package com.example.facenav
 
 import android.Manifest
-import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
@@ -14,9 +14,11 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import com.example.facenav.service.FaceDetectionService
+import com.example.facenav.data.PreferencesManager
 import com.example.facenav.ui.screens.*
 import com.example.facenav.ui.theme.FaceNavTheme
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 
 class MainActivity : ComponentActivity() {
 
@@ -45,6 +47,13 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Determine start destination based on first-launch flag (Issue 17).
+        // runBlocking is acceptable here because it's a single lightweight
+        // DataStore read done before the first frame is drawn.
+        enableEdgeToEdge()
+        val preferencesManager = PreferencesManager(this)
+        val hasSeenOnboarding = runBlocking { preferencesManager.hasSeenOnboarding().first() }
+
         // Request necessary permissions
         requestPermissions()
 
@@ -54,7 +63,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    FaceNavApp()
+                    FaceNavApp(startDestination = if (hasSeenOnboarding) "home" else "onboarding")
                 }
             }
         }
@@ -75,10 +84,10 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun FaceNavApp() {
+fun FaceNavApp(startDestination: String = "home") {
     val navController = rememberNavController()
 
-    NavHost(navController = navController, startDestination = "home") {
+    NavHost(navController = navController, startDestination = startDestination) {
         composable("home") {
             HomeScreen(navController)
         }
